@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Conferência de itens</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f4f5ef;color:#223d35;font:16px "DM Sans",system-ui,sans-serif}main{max-width:1100px;margin:8vh auto;padding:0 24px}header,.tools,footer,.actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap}header,footer{justify-content:space-between}header{margin-bottom:32px}h1{font:normal clamp(32px,5vw,52px) Georgia,serif;letter-spacing:-2px;margin:0}button,input{font:inherit}button{border:1px solid #a8b6aa;border-radius:8px;padding:11px 16px;background:white;color:inherit;cursor:pointer;font-weight:600}button.primary{background:#245441;color:white;border-color:#245441}button:disabled{opacity:.5;cursor:default}section{border:1px solid #cdd5cb;border-radius:14px;background:#fff;overflow:hidden}.tools,footer{padding:18px 22px}.tools{justify-content:space-between}input[type=search],input[type=number]{border:1px solid #b7c3ba;border-radius:6px;color:inherit;padding:9px;background:white}input[type=search]{width:min(100%,330px)}label{cursor:pointer}input[type=checkbox]{accent-color:#245441}input:focus-visible,button:focus-visible{outline:3px solid #609e86;outline-offset:2px}.scroll{overflow:auto;max-height:62vh}table{border-collapse:separate;border-spacing:0;width:100%;min-width:550px}th{position:sticky;top:0;background:#e9eee6;font-size:12px;letter-spacing:1.2px;text-align:left;padding:13px 12px}td{padding:9px 12px;border-bottom:1px solid #e3e8e1}th:first-child,td:first-child{padding-left:22px;width:48%;overflow-wrap:anywhere;white-space:pre-wrap}input[type=number]{width:100%;min-width:65px}footer{font-size:14px;color:#52665c;border-top:1px solid #dce3da}#empty{text-align:center;padding:54px 16px;color:#50695b}#empty strong{display:block;font:normal 25px Georgia,serif;margin-bottom:8px}#notice{color:#8d391c}#notice:empty{display:none}
+</style>
+<main><header><h1>Conferência de itens</h1><div class="actions"><button id="upload" class="primary">Importar CSV</button><input type="file" id="file" accept=".csv,text/csv" hidden><button id="download" disabled>Baixar planilha</button></div></header>
+<p role="alert" id="notice"></p>
+<section aria-label="Itens da conferência"><div class="tools"><input type="search" id="search" placeholder="Pesquisar item pelo nome" aria-label="Pesquisar item pelo nome"><label><input type="checkbox" id="pending"> Somente pendentes</label></div>
+<div class="scroll"><table><thead><tr><th>ITEM</th><th>ALTO</th><th>MÉDIO</th><th>BAIXO</th><th>DEFEITO</th></tr></thead><tbody></tbody></table></div>
+<div id="empty"><strong>Importe sua lista de itens</strong>Selecione um CSV com uma coluna, sem cabeçalho.</div>
+<footer><span id="summary">Nenhum arquivo importado</span><span id="status" role="status"></span></footer></section></main>
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const body = document.querySelector('tbody');
+const key = 'conferencia-itens-v1';
+const fields = ['ALTO','MÉDIO','BAIXO','DEFEITO'];
+let sheet = null;
+function parseCSV(source){
+  const rows = [];
+  let value = '', quoted = false, closed = false;
+  for(let i=0;i<source.length;i++){
+    const c=source[i];
+    if(quoted){
+      if(c !== '"') value+=c;
+      else if(source[i+1] === '"'){value+='"';i++}
+      else {quoted=false;closed=true}
+    }else if(c==='\r'||c==='\n'){
+      if(value.trim()) rows.push(value);
+      value='';closed=false;
+      if(c==='\r' && source[i+1]==='\n') i++;
+    }else if(c==='"' && !value && !closed) quoted=true;
+    else if(closed || c==='"' || c===',' || c===';') throw Error('Use uma coluna por linha. Coloque nomes com vírgula ou ponto e vírgula entre aspas duplas.');
+    else value+=c;
+  }
+  if(quoted) throw Error('Há um item com aspas sem fechamento.');
+  if(value.trim()) rows.push(value);
+  if(!rows.length) throw Error('O arquivo está vazio.');
+  return rows;
+}
+const normalize = s=>s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+const isPending = row=>row.slice(1,4).every(v=>v==='');
+function render(){
+  body.replaceChildren();
+  if(!sheet)return;
+  const query=normalize($('search').value.trim());
+  const fragment=document.createDocumentFragment();
+  sheet.rows.forEach((row,index)=>{
+    if(!normalize(row[0]).includes(query) || ($('pending').checked && !isPending(row))) return;
+    const tr=document.createElement('tr');
+    tr.dataset.index=index;
+    tr.insertCell().textContent=row[0];
+    fields.forEach((name,i)=>{
+      const input=document.createElement('input');
+      input.type='number';input.min='0';input.step='1';input.inputMode='numeric';
+      input.value=row[i+1];input.dataset.column=i+1;
+      input.setAttribute('aria-label',name+' — '+row[0]);
+      tr.insertCell().append(input);
+    });
+    fragment.append(tr);
+  });
+  body.append(fragment);
+  $('empty').hidden=body.rows.length>0;
+  $('empty').textContent='Nenhum item corresponde aos filtros.';
+  summarize();
+  $('download').disabled=false;
+}
+function summarize(){
+  $('summary').textContent=sheet.name+' · '+body.rows.length+' de '+sheet.rows.length+' itens';
+}
+function save(next){
+  try{localStorage.setItem(key,JSON.stringify(next))}
+  catch{throw Error('Não foi possível salvar no navegador. Verifique o espaço e as permissões de armazenamento.')}
+  $('status').textContent='Salvo neste navegador';
+}
+try{
+  sheet=JSON.parse(localStorage.getItem(key));
+  if(sheet){render();$('status').textContent='Progresso restaurado'}
+}catch{$('notice').textContent='Não foi possível restaurar os dados salvos.'}
+$('upload').onclick=()=>$('file').click();
+$('file').onchange=async e=>{
+  const file=e.target.files[0];e.target.value='';if(!file)return;
+  $('notice').textContent='';
+  try{
+    const bytes=await file.arrayBuffer();
+    let source;
+    try{source=new TextDecoder('utf-8',{fatal:true}).decode(bytes)}
+    catch{source=new TextDecoder('windows-1252').decode(bytes)}
+    const names=parseCSV(source);
+    if(sheet && sheet.name===file.name && names.length===sheet.rows.length && names.every((n,i)=>n===sheet.rows[i][0])){
+      $('status').textContent='Mesmo arquivo · progresso mantido';return;
+    }
+    if(sheet && !confirm('Substituir a lista atual por '+file.name+'? As quantidades da lista atual serão apagadas.'))return;
+    const next={name:file.name,rows:names.map(n=>[n,'','','',''])};
+    save(next);sheet=next;$('search').value='';$('pending').checked=false;render();
+  }catch(error){$('notice').textContent=error.message}
+};
+body.addEventListener('input',e=>{
+  const input=e.target;
+  const row=sheet.rows[input.closest('tr').dataset.index];
+  const col=Number(input.dataset.column);
+  if(!input.validity.valid || (input.value && !Number.isSafeInteger(Number(input.value)))){
+    $('notice').textContent='Informe uma quantidade inteira igual ou maior que zero. A última quantidade válida foi mantida.';return;
+  }
+  const previous=row[col];
+  row[col]=input.value===''?'':String(Number(input.value));
+  try{save(sheet);$('notice').textContent=''}
+  catch(error){row[col]=previous;input.value=previous;$('notice').textContent=error.message}
+});
+body.addEventListener('focusout',e=>{
+  const tr=e.target.closest('tr');
+  if(!tr || !sheet)return;
+  const row=sheet.rows[tr.dataset.index];
+  e.target.value=row[e.target.dataset.column];
+  if($('pending').checked && !isPending(row)){
+    setTimeout(()=>{if(tr.isConnected && !tr.contains(document.activeElement) && !isPending(row)){tr.remove();summarize();$('empty').hidden=body.rows.length>0}},0);
+  }
+});
+$('search').oninput=render;$('pending').onchange=render;
+$('download').onclick=()=>{
+  const escape=v=>'"'+v.replaceAll('"','""')+'"';
+  const lines=[['ITEM',...fields],...sheet.rows].map(row=>row.map(escape).join(';'));
+  const url=URL.createObjectURL(new Blob(['\ufeff',lines.join('\r\n')],{type:'text/csv;charset=utf-8'}));
+  const a=document.createElement('a');a.href=url;a.download=sheet.name.replace(/\.csv$/i,'')+'-conferencia.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+};
+</script></html>
