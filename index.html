@@ -31,7 +31,7 @@ function parseCSV(source){
       value='';closed=false;
       if(c==='\r' && source[i+1]==='\n') i++;
     }else if(c==='"' && !value && !closed) quoted=true;
-    else if(closed || c==='"' || c===',' || c===';') throw Error('Use uma coluna por linha. Coloque nomes com vírgula ou ponto e vírgula entre aspas duplas.');
+    else if(closed) throw Error('Há texto após o fechamento das aspas de um item.');
     else value+=c;
   }
   if(quoted) throw Error('Há um item com aspas sem fechamento.');
